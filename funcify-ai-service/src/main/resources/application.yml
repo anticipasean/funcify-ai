@@ -1,0 +1,17 @@
+---
+spring:
+  application:
+    name: funcify-ai
+  main:
+    web-application-type: reactive
+  webflux:
+    base-path: /funcify-ai
+server:
+  port: 8343
+
+logging:
+  level:
+    funcify.ai: INFO # Can toggle if debug level needed during local testing
+
+ai-service:
+

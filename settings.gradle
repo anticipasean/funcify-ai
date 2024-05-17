@@ -1,1 +1,8 @@
-rootProject.name = 'ai'
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+    }
+}
+rootProject.name = 'funcify-ai'
+include('funcify-ai-service')
+

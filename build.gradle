@@ -1,67 +1,190 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 plugins {
-	id 'org.springframework.boot' version '3.2.5'
-	id 'io.spring.dependency-management' version '1.1.4'
-	id 'org.jetbrains.kotlin.jvm' version '1.9.23'
-	id 'org.jetbrains.kotlin.plugin.spring' version '1.9.23'
+    id 'java-library'
+    id 'org.springframework.boot' version "${springBootPluginVersion}"
+    id 'org.jetbrains.kotlin.jvm' version "${kotlinPluginVersion}"
+    id 'org.jetbrains.kotlin.plugin.spring' version "${kotlinPluginVersion}"
 }
 
-group = 'funcify'
-version = '0.0.1-SNAPSHOT'
+jar {
+    enabled = false
+}
+
+bootJar {
+    enabled = false
+}
 
 java {
-	sourceCompatibility = '17'
+    toolchain { JavaToolchainSpec jts ->
+        jts.languageVersion.set(JavaLanguageVersion.of(17))
+    }
 }
 
-repositories {
-	mavenCentral()
-	maven { url 'https://repo.spring.io/milestone' }
+kotlin { org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension kjpe ->
+    kjpe.jvmToolchain { JavaToolchainSpec jts ->
+        jts.languageVersion.set(JavaLanguageVersion.of(17))
+    }
 }
 
-ext {
-	set('springAiVersion', "0.8.1")
-	set('springCloudGcpVersion', "5.1.2")
-	set('springCloudVersion', "2023.0.1")
+allprojects {
+
+    repositories {
+        mavenCentral()
+        maven {
+            url 'https://repo.spring.io/milestone'
+        }
+    }
+
+    /**
+     * Must be placed within allprojects or subprojects scoped for changes configured to be applied to all projects
+     */
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile).configureEach { org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile kjc ->
+        kjc.compilerOptions { org.jetbrains.kotlin.gradle.dsl.KotlinJvmCompilerOptions kjco ->
+            kjco.apiVersion = org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9
+            kjco.languageVersion = org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9
+            kjco.jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+            kjco.javaParameters = true
+        }
+    }
+
 }
 
-dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-integration'
-	implementation 'org.springframework.boot:spring-boot-starter-rsocket'
-	implementation 'org.springframework.boot:spring-boot-starter-webflux'
-	implementation 'org.springframework.boot:spring-boot-starter-websocket'
-	implementation 'com.fasterxml.jackson.module:jackson-module-kotlin'
-	implementation 'com.google.cloud:spring-cloud-gcp-starter'
-	implementation 'io.projectreactor.kotlin:reactor-kotlin-extensions'
-	implementation 'org.jetbrains.kotlin:kotlin-reflect'
-	implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-reactor'
-	implementation 'org.springframework.ai:spring-ai-ollama-spring-boot-starter'
-	implementation 'org.springframework.integration:spring-integration-rsocket'
-	implementation 'org.springframework.integration:spring-integration-stomp'
-	implementation 'org.springframework.integration:spring-integration-webflux'
-	implementation 'org.springframework.integration:spring-integration-websocket'
-	developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
-	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-	testImplementation 'io.projectreactor:reactor-test'
-	testImplementation 'org.springframework.integration:spring-integration-test'
-	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+def Action<org.gradle.api.artifacts.Configuration> projectWideConfigurationConstraintsAction = { org.gradle.api.artifacts.Configuration c ->
+    c.resolutionStrategy { org.gradle.api.artifacts.ResolutionStrategy rs ->
+        /**
+         * Issue: "Unable to load io.netty.resolver.dns.macos.MacOSDnsServerAddressStreamProvider,
+         * fallback to system defaults. This may result in incorrect DNS resolutions on MacOS."
+         * Solution: osx-aarch_64 classified version of Netty
+         * https://repo1.maven.org/maven2/io/netty/netty-resolver-dns-native-macos/4.1.58.Final/
+         *
+         * Upgrade all netty deps to same higher version that support aarch_64 Apple's M1 chip
+         * with a different classifier dns resolver for native MacOS: aarch_64 instead of x86_64
+         * if building on a MacOS. Otherwise, use default version specified by io.projectreactor group
+         */
+        rs.dependencySubstitution { org.gradle.api.artifacts.DependencySubstitutions dss ->
+            dss.all { org.gradle.api.artifacts.DependencySubstitution ds ->
+                if (ds.requested instanceof org.gradle.api.artifacts.component.ModuleComponentSelector &&
+                        ds.requested.group == "io.netty" &&
+                        ds.requested.module == "netty-resolver-dns-native-macos" &&
+                        System.getProperty("os.name") == 'Mac OS X' &&
+                        System.getProperty("os.arch") == 'aarch64') {
+                    ds.useTarget("io.netty:netty-resolver-dns-native-macos:${nettyVersion}:osx-aarch_64")
+                    ds.artifactSelection { org.gradle.api.artifacts.ArtifactSelectionDetails asd ->
+                        asd.selectArtifact("jar", "jar", "osx-aarch_64")
+                    }
+                }
+                if (ds.requested instanceof org.gradle.api.artifacts.component.ModuleComponentSelector &&
+                        ds.requested.group == "io.netty" &&
+                        ds.requested.module == "netty-transport-native-epoll" &&
+                        System.getProperty("os.name") == 'Mac OS X' &&
+                        System.getProperty("os.arch") == 'aarch64') {
+                    ds.useTarget("io.netty:netty-transport-native-epoll:${nettyVersion}:linux-aarch_64")
+                    ds.artifactSelection { org.gradle.api.artifacts.ArtifactSelectionDetails asd ->
+                        asd.selectArtifact("jar", "jar", "linux-aarch_64")
+                    }
+                }
+            }
+        }
+        rs.eachDependency { org.gradle.api.artifacts.DependencyResolveDetails d ->
+            if (d.requested.group == 'io.netty') {
+                d.useVersion(nettyVersion)
+            }
+        }
+    }
 }
 
-dependencyManagement {
-	imports {
-		mavenBom "com.google.cloud:spring-cloud-gcp-dependencies:${springCloudGcpVersion}"
-		mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
-		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
-	}
-}
+// TODO: Break up different subproject configurations as project grows
+ext.mainKotlinSubProjects = subprojects.findAll()
 
-tasks.withType(KotlinCompile) {
-	kotlinOptions {
-		freeCompilerArgs += '-Xjsr305=strict'
-		jvmTarget = '17'
-	}
-}
+configure(mainKotlinSubProjects) {
+    apply plugin: 'java-library'
+    apply plugin: 'org.jetbrains.kotlin.jvm'
+    apply plugin: 'org.jetbrains.kotlin.plugin.spring'
+    apply plugin: 'org.springframework.boot'
+    apply plugin: 'io.spring.dependency-management'
 
-tasks.named('test') {
-	useJUnitPlatform()
+    java {
+        toolchain { JavaToolchainSpec jts ->
+            jts.languageVersion.set(JavaLanguageVersion.of(17))
+        }
+        withSourcesJar()
+    }
+
+    configurations {
+        configureEach(projectWideConfigurationConstraintsAction)
+        kotlinConf {
+            dependencies {
+                implementation 'org.jetbrains.kotlin:kotlin-reflect'
+                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-reactor'
+            }
+        }
+        spring {
+            dependencies {
+                implementation 'org.springframework.boot:spring-boot-starter-integration'
+                implementation 'org.springframework.boot:spring-boot-starter-rsocket'
+                implementation 'org.springframework.boot:spring-boot-starter-webflux'
+                implementation 'org.springframework.boot:spring-boot-starter-websocket'
+                implementation 'org.springframework.ai:spring-ai-ollama-spring-boot-starter'
+                implementation 'org.springframework.integration:spring-integration-rsocket'
+                implementation 'org.springframework.integration:spring-integration-stomp'
+                implementation 'org.springframework.integration:spring-integration-webflux'
+                implementation 'org.springframework.integration:spring-integration-websocket'
+                developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
+                testImplementation 'org.springframework.boot:spring-boot-starter-test'
+                testImplementation 'org.springframework.integration:spring-integration-test'
+
+            }
+        }
+        gcloud {
+            dependencies {
+                implementation 'com.google.cloud:spring-cloud-gcp-starter'
+            }
+        }
+        reactor {
+            dependencies {
+                implementation 'io.projectreactor.kotlin:reactor-kotlin-extensions'
+                testImplementation 'io.projectreactor:reactor-test'
+            }
+        }
+        jackson {
+            dependencies {
+                implementation 'com.fasterxml.jackson.module:jackson-module-kotlin'
+            }
+        }
+        junit {
+            dependencies {
+                testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+            }
+        }
+    }
+
+    dependencyManagement {
+        imports {
+            mavenBom "com.google.cloud:spring-cloud-gcp-dependencies:${springCloudGcpVersion}"
+            mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
+            mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+        }
+    }
+
+    task testWithJUnit(type: Test) {
+        description = 'Runs JUnit Platform tests.'
+        useJUnitPlatform()
+
+        beforeTest { descriptor ->
+            logger.lifecycle("Running JUnit test: ${descriptor}")
+        }
+
+        afterTest { descriptor, result ->
+            logger.lifecycle("Executed JUnit test ${descriptor} with result: ${result.resultType}")
+        }
+
+        testLogging {
+            showStackTraces = true
+            exceptionFormat = "full"
+        }
+    }
+
+    test {
+        description = 'Runs all unit tests.'
+        dependsOn testWithJUnit
+    }
 }
